@@ -68,12 +68,12 @@ if ! command -v tailscale >/dev/null 2>&1; then
         i686) TS_ARCH="386" ;;
         *) die "unsupported architecture $(uname -m) for Tailscale static binary" ;;
     esac
-    TS_VERSION="$(curl -fsSL https://pkgs.tailscale.com/stable/?mode=json | python3 -c 'import json,sys; print(json.load(sys.stdin)["TarballsVersion"])' 2>/dev/null || echo "")"
+    TS_VERSION="$(curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://pkgs.tailscale.com/stable/?mode=json | python3 -c 'import json,sys; print(json.load(sys.stdin)["TarballsVersion"])' 2>/dev/null || echo "")"
     if [[ -z "$TS_VERSION" ]]; then
-        die "could not determine latest Tailscale version; install tailscale manually and re-run"
+        die "could not determine latest Tailscale version (network may be unstable — re-run this script to retry); or install tailscale manually"
     fi
     TS_TARBALL="tailscale_${TS_VERSION}_${TS_ARCH}.tgz"
-    curl -fsSL -o /tmp/tailscale.tgz "https://pkgs.tailscale.com/stable/${TS_TARBALL}"
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o /tmp/tailscale.tgz "https://pkgs.tailscale.com/stable/${TS_TARBALL}"
     tar -xzf /tmp/tailscale.tgz -C /tmp
     cp "/tmp/tailscale_${TS_VERSION}_${TS_ARCH}/tailscale" "/tmp/tailscale_${TS_VERSION}_${TS_ARCH}/tailscaled" "$ULTRON_HOME/bin/"
     chmod +x "$ULTRON_HOME/bin/tailscale" "$ULTRON_HOME/bin/tailscaled"
