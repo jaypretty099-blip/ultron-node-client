@@ -1,4 +1,4 @@
-# 🤖 The Ultron Legion
+# The Ultron Legion
 
 *n. a growing army of retired Android phones that got bored of being paperweights and decided to think for a living instead.*
 
@@ -32,6 +32,7 @@ No smoke, no mirrors, just your phone quietly:
 3. Joining a private [Tailscale](https://tailscale.com) network — your phone gets an ID card and a name like `ultron-node-a1b2`, and nothing about it is reachable from the open internet.
 4. Getting itself a Tailscale membership card automatically. You don't touch a single key — the script fetches one from the coordinator on its own, uses it once, and never keeps a copy lying around.
 5. Setting itself up to survive a reboot, so once it's in, it's *in*. Every restart, it reports back for duty without you lifting a finger.
+6. Checking in quietly every so often for anything new, and updating itself in the background if there is. You'll never see a prompt, never need to re-run this command — once you're in, you're taken care of.
 
 Your phone doesn't download the AI model itself, doesn't need to be plugged in forever, and isn't doing anything alarming — it's just lending some idle compute to a cluster that does the actual thinking elsewhere. Think "seti@home," not "skynet." Probably.
 
