@@ -13,11 +13,15 @@ set -euo pipefail
 # CONFIG
 # ============================================================================
 
-# Fill this in before distributing this script. Left blank on purpose: this
-# repo is public, and a live Tailscale auth key committed to git history
-# would let anyone join the tailnet. Distribute the real key to supporters
-# out-of-band (DM, a --tags-scoped reusable key, etc), not via this file.
-TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-REPLACE_WITH_YOUR_TAILSCALE_AUTH_KEY}"
+# No key lives in this file on purpose: this repo is public, and a live
+# Tailscale auth key committed to git history would let anyone join the
+# tailnet forever (git history doesn't forget). Instead, if the caller
+# hasn't already set TAILSCALE_AUTH_KEY themselves, this script fetches a
+# fresh one at install time from the orchestrator, which serves it from a
+# file that lives only on the VPS — so it can be rotated or killed instantly
+# without touching this script or its git history at all.
+ORCHESTRATOR_JOIN_KEY_URL="http://47.84.207.32:8000/join-key"
+TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
 
 ULTRON_HOME="$HOME/.ultron"
 TAILSCALE_DIR="$HOME/.tailscale"
@@ -168,11 +172,15 @@ if ! pgrep -f "tailscaled.*--socket=$TAILSCALE_SOCKET" >/dev/null 2>&1; then
     sleep 2
 fi
 
-if [[ "$TAILSCALE_AUTH_KEY" == "REPLACE_WITH_YOUR_TAILSCALE_AUTH_KEY" ]]; then
-    log "WARNING: TAILSCALE_AUTH_KEY is still a placeholder."
-    log "Set it via: TAILSCALE_AUTH_KEY=tskey-... bash install_node.sh"
-    log "or export it before piping this script into bash. Skipping 'tailscale up' for now —"
-    log "run it manually once you have a key:"
+if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
+    log "No TAILSCALE_AUTH_KEY set, fetching a join key from the orchestrator ..."
+    TAILSCALE_AUTH_KEY="$(curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors "$ORCHESTRATOR_JOIN_KEY_URL" 2>/dev/null || true)"
+fi
+
+if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
+    log "WARNING: could not obtain a Tailscale auth key (env var unset and the orchestrator's"
+    log "join-key endpoint didn't respond). Skipping 'tailscale up' for now — run it manually"
+    log "once you have a key:"
     log "  $TAILSCALE_BIN --socket=$TAILSCALE_SOCKET up --authkey=<key> --hostname=$NODE_HOSTNAME --accept-dns=false"
 else
     "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" up \
