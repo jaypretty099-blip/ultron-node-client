@@ -469,6 +469,42 @@ BASHRCEOF
 fi
 
 # ----------------------------------------------------------------------------
+# 6b. Termux:Boot and the .bashrc hook above both only fire at specific
+#     moments (an actual reboot, or you reopening the app) — neither
+#     notices if Android kills this phone's Ultron processes while Termux
+#     stays nominally open, which happens (confirmed on a real device: the
+#     app was still "open," wake lock and all, and every Ultron process was
+#     just gone). termux-services' runsv is already on this phone keeping
+#     other things (sshd, cloudflared, whatever else you've got running)
+#     alive through exactly that — it respawns a supervised process the
+#     instant it dies, no reboot or reopen required. This puts Ultron under
+#     the same supervision instead of reinventing it: one small watchdog
+#     service that reruns the same guarded start_ultron.sh every 30s,
+#     forever, restarted itself by runsv if it ever somehow dies too.
+# ----------------------------------------------------------------------------
+log "Putting this phone's Ultron processes under the same supervisor already keeping your other services alive ..."
+SV_DIR="$PREFIX/var/service/ultron-watchdog"
+mkdir -p "$SV_DIR"
+cat > "$SV_DIR/run" <<RUNEOF
+#!$PREFIX/bin/bash
+# runsv execs this directly and restarts it the instant it exits — the
+# while-loop below is the actual watchdog; this file just has to keep
+# running for runsv to consider the service "up."
+while true; do
+    "$HOME/.termux/boot/start_ultron.sh" >> "$HOME/.ultron/logs/node.log" 2>&1
+    sleep 30
+done
+RUNEOF
+chmod +x "$SV_DIR/run"
+
+if ! pgrep -f "runsvdir $PREFIX/var/service" >/dev/null 2>&1; then
+    log "Starting the service supervisor (runsvdir) — it wasn't running yet ..."
+    nohup runsvdir "$PREFIX/var/service" >/dev/null 2>&1 &
+    disown
+    sleep 1
+fi
+
+# ----------------------------------------------------------------------------
 # 7. No point making you wait for a reboot — report for duty right now
 # ----------------------------------------------------------------------------
 log "Skipping the paperwork, sending you straight to the front line ..."
