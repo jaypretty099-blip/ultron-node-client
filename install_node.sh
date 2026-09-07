@@ -177,7 +177,28 @@ if ! pgrep -f "tailscaled.*--socket=$TAILSCALE_SOCKET" >/dev/null 2>&1; then
         --tun=userspace-networking \
         --socks5-server=127.0.0.1:${TAILSCALE_SOCKS5_PORT} \
         >> "$ULTRON_HOME/logs/tailscaled.log" 2>&1 &
-    sleep 2
+fi
+
+# A flat "sleep 2" here used to bite us: on a slow moment the daemon's
+# socket isn't ready yet, and the first "tailscale up" hits it mid-boot and
+# fails with a bare "unexpected EOF" — confirmed on a real device. Poll for
+# readiness instead of guessing at a fixed delay.
+log "Waiting for the connection to actually come up ..."
+TAILSCALED_READY=""
+for i in $(seq 1 30); do
+    # Socket existing, not "status" succeeding: status legitimately returns
+    # non-zero ("Logged out") before we've authenticated, which isn't the
+    # same thing as "daemon not ready yet" — checking that instead would
+    # spin the full 30s and fail every single time. The socket appearing
+    # means the daemon is listening, whatever our login state is.
+    if [[ -S "$TAILSCALE_SOCKET" ]]; then
+        TAILSCALED_READY=1
+        break
+    fi
+    sleep 1
+done
+if [[ -z "$TAILSCALED_READY" ]]; then
+    die "tailscaled never became ready — check $ULTRON_HOME/logs/tailscaled.log"
 fi
 
 if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
