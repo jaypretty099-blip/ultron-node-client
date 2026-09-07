@@ -10,6 +10,8 @@
 #
 # Enlistment line:
 #   curl -fsSL https://raw.githubusercontent.com/<you>/ultron-node-client/main/install_node.sh | bash
+#
+# (auto-update test marker — safe to ignore)
 set -euo pipefail
 
 # ============================================================================
