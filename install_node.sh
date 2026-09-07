@@ -80,11 +80,14 @@ if [[ ! -x "$ULTRON_HOME/bin/tailscaled" ]]; then
     if [[ ! -d "$TS_SRC_DIR" ]]; then
         git clone --depth 1 https://github.com/tailscale/tailscale.git "$TS_SRC_DIR"
     fi
-    # ts_omit_ssh: we don't need the SSH-server feature, and skipping it
-    # sidesteps an unrelated build-tag gap where that feature's build
-    # constraints don't yet know to exclude android.
-    (cd "$TS_SRC_DIR" && go build -tags ts_omit_ssh -o "$ULTRON_HOME/bin/tailscaled" ./cmd/tailscaled)
-    (cd "$TS_SRC_DIR" && go build -tags ts_omit_ssh -o "$ULTRON_HOME/bin/tailscale" ./cmd/tailscale)
+    # These ts_omit_* tags skip features we don't need (SSH server, system
+    # tray icon, Synology cert helper, CLI connection diagnostics, ACME) —
+    # and, as a side effect, dodge a handful of build-constraint gaps where
+    # each feature's "linux-only" tag forgot to also exclude android. Found
+    # by just building it and fixing whatever broke, one file at a time.
+    TS_BUILD_TAGS="ts_omit_ssh,ts_omit_systray,ts_omit_synology,ts_omit_cliconndiag,ts_omit_acme"
+    (cd "$TS_SRC_DIR" && go build -tags "$TS_BUILD_TAGS" -o "$ULTRON_HOME/bin/tailscaled" ./cmd/tailscaled)
+    (cd "$TS_SRC_DIR" && go build -tags "$TS_BUILD_TAGS" -o "$ULTRON_HOME/bin/tailscale" ./cmd/tailscale)
 else
     log "Already built Tailscale from source — skipping"
 fi
