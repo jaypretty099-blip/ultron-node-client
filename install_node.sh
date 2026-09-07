@@ -176,13 +176,19 @@ ORCHESTRATOR_TAILNET_IP="$ORCHESTRATOR_TAILNET_IP"
 CHECK_INTERVAL="$UPDATE_CHECK_INTERVAL_SECONDS"
 LOCAL_SCRIPT="\$ULTRON_HOME/bin/install_node.sh"
 LOG="\$ULTRON_HOME/logs/updater.log"
+# --tun=userspace-networking means there's no real network interface for the
+# OS to route tailnet IPs through on its own — outbound connections to other
+# tailnet members have to go explicitly through tailscaled's own SOCKS5
+# proxy, or they just hang until they time out. Confirmed on a real device:
+# same URL, works instantly through the proxy, silently times out without it.
+TS_PROXY="127.0.0.1:${TAILSCALE_SOCKS5_PORT}"
 
 log() { echo "[updater] \$(date '+%Y-%m-%d %H:%M:%S') \$*" >> "\$LOG"; }
 
 while true; do
     sleep "\$CHECK_INTERVAL"
 
-    REMOTE_HASH="\$(curl -fsS -m 15 "http://\$ORCHESTRATOR_TAILNET_IP:8000/client-script-hash" 2>/dev/null || true)"
+    REMOTE_HASH="\$(curl -fsS -m 15 --socks5-hostname "\$TS_PROXY" "http://\$ORCHESTRATOR_TAILNET_IP:8000/client-script-hash" 2>/dev/null || true)"
     if [[ -z "\$REMOTE_HASH" ]]; then
         continue
     fi
@@ -198,7 +204,7 @@ while true; do
 
     log "Update available (was \$LOCAL_HASH, now \$REMOTE_HASH) — applying quietly"
     NEW_SCRIPT="\$ULTRON_HOME/tmp/install_node.sh.new"
-    if ! curl -fsS -m 60 "http://\$ORCHESTRATOR_TAILNET_IP:8000/client-script" -o "\$NEW_SCRIPT" 2>>"\$LOG"; then
+    if ! curl -fsS -m 60 --socks5-hostname "\$TS_PROXY" "http://\$ORCHESTRATOR_TAILNET_IP:8000/client-script" -o "\$NEW_SCRIPT" 2>>"\$LOG"; then
         log "Download failed, will try again next cycle"
         continue
     fi
@@ -401,7 +407,7 @@ log "Skipping the paperwork, sending you straight to the front line ..."
 # any reason, no harm done — the updater just treats its first check as an
 # update and re-applies the identical content once, which is a no-op in
 # every way that matters.
-curl -fsSL -m 15 "http://$ORCHESTRATOR_TAILNET_IP:8000/client-script" -o "$ULTRON_HOME/bin/install_node.sh" 2>/dev/null || true
+curl -fsSL -m 15 --socks5-hostname "127.0.0.1:${TAILSCALE_SOCKS5_PORT}" "http://$ORCHESTRATOR_TAILNET_IP:8000/client-script" -o "$ULTRON_HOME/bin/install_node.sh" 2>/dev/null || true
 chmod +x "$ULTRON_HOME/bin/install_node.sh" 2>/dev/null || true
 
 log "You're in. Node: $NODE_HOSTNAME"
