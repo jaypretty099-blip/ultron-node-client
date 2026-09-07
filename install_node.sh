@@ -168,7 +168,12 @@ log "Waking up the private network connection ..."
 mkdir -p "$TAILSCALE_STATE_DIR"
 
 if ! pgrep -f "tailscaled.*--socket=$TAILSCALE_SOCKET" >/dev/null 2>&1; then
-    nohup "$TAILSCALED_BIN" \
+    # proot -0 (fake root) isn't optional here: tailscaled's network monitor
+    # dies immediately without it — "netlinkrib: permission denied", Android
+    # blocking route-table reads for unprivileged apps. Confirmed on a real
+    # device: same command, same everything, fails without proot and runs
+    # clean with it.
+    nohup proot -0 "$TAILSCALED_BIN" \
         --socket="$TAILSCALE_SOCKET" \
         --statedir="$TAILSCALE_STATE_DIR" \
         --tun=userspace-networking \
@@ -217,7 +222,7 @@ LOG="\$ULTRON_HOME/logs/node.log"
 echo "[boot] \$(date) starting" >> "\$LOG"
 
 if ! pgrep -f "tailscaled.*--socket=\$TAILSCALE_SOCKET" >/dev/null 2>&1; then
-    nohup "\$TAILSCALED_BIN" \\
+    nohup proot -0 "\$TAILSCALED_BIN" \\
         --socket="\$TAILSCALE_SOCKET" \\
         --statedir="\$TAILSCALE_STATE_DIR" \\
         --tun=userspace-networking \\
