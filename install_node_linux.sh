@@ -312,7 +312,13 @@ if "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4 >/dev/null 2>&1; then
     log "Already enlisted from before — resuming as $("$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4)"
 elif [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
     log "No key on hand — sending a runner to fetch one from HQ ..."
-    TAILSCALE_AUTH_KEY="$(curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors "$ORCHESTRATOR_JOIN_KEY_URL" 2>/dev/null || true)"
+    # No --retry-all-errors here on purpose: that flag needs curl 7.71+
+    # (added 2020), and plenty of still-common Linux distros (this VPS's own
+    # Ubuntu base included — ships 7.68.0) don't have it. It's silently an
+    # "unknown option" on older curl, which exits nonzero before ever
+    # trying the request — confirmed live during testing, not a guess.
+    # Plain --retry still covers the connection-level failures that matter.
+    TAILSCALE_AUTH_KEY="$(curl -fsSL --retry 5 --retry-delay 3 "$ORCHESTRATOR_JOIN_KEY_URL" 2>/dev/null || true)"
     if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
         log "WARNING: couldn't get a key (HQ didn't answer and none was provided). Everything"
         log "else is installed and ready — you just need to finish enlistment manually once"
