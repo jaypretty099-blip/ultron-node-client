@@ -33,6 +33,14 @@ TAILSCALE_SOCKS5_PORT=1055
 
 LLAMA_CPP_REPO="https://github.com/ggml-org/llama.cpp.git"
 LLAMA_CPP_DIR="$ULTRON_HOME/src/llama.cpp"
+# Pinned, not "whatever HEAD is today" — llama.cpp's own docs call the RPC
+# backend fragile/proof-of-concept, and this has to talk to the exact same
+# protocol version the VPS orchestrator's llama-server was built from. Two
+# different commits on either end connected fine at the TCP level and then
+# just hung forever, no error at all. If this ever gets bumped, bump the
+# matching pin in deploy_vps.sh in the same breath — they have to move
+# together, not independently.
+LLAMA_CPP_PINNED_COMMIT="0cae43063cf15170e91a2ff4d034da0ecef4a1b2"
 
 # Both of these only answer to the tailnet, never the open internet. The RPC
 # worker in particular has zero authentication by design (llama.cpp's own
@@ -153,11 +161,21 @@ PYEOF
 # ----------------------------------------------------------------------------
 # 3. Basic training: compile the actual worker software
 # ----------------------------------------------------------------------------
-if [[ ! -x "$ULTRON_HOME/bin/ggml-rpc-server" ]]; then
+LLAMA_CPP_CURRENT_COMMIT=""
+if [[ -d "$LLAMA_CPP_DIR/.git" ]]; then
+    LLAMA_CPP_CURRENT_COMMIT="$(cd "$LLAMA_CPP_DIR" && git rev-parse HEAD 2>/dev/null || true)"
+fi
+
+if [[ ! -x "$ULTRON_HOME/bin/ggml-rpc-server" || "$LLAMA_CPP_CURRENT_COMMIT" != "$LLAMA_CPP_PINNED_COMMIT" ]]; then
     log "Compiling your phone's new job description. This is the slow part — go make tea ..."
-    if [[ ! -d "$LLAMA_CPP_DIR" ]]; then
-        git clone --depth 1 "$LLAMA_CPP_REPO" "$LLAMA_CPP_DIR"
+    if [[ ! -d "$LLAMA_CPP_DIR/.git" ]]; then
+        rm -rf "$LLAMA_CPP_DIR"
+        mkdir -p "$LLAMA_CPP_DIR"
+        git init -q "$LLAMA_CPP_DIR"
+        git -C "$LLAMA_CPP_DIR" remote add origin "$LLAMA_CPP_REPO"
     fi
+    git -C "$LLAMA_CPP_DIR" fetch --depth 1 origin "$LLAMA_CPP_PINNED_COMMIT"
+    git -C "$LLAMA_CPP_DIR" checkout -q FETCH_HEAD
     cmake -S "$LLAMA_CPP_DIR" -B "$LLAMA_CPP_DIR/build" -DGGML_RPC=ON -DCMAKE_BUILD_TYPE=Release
     cmake --build "$LLAMA_CPP_DIR/build" --target ggml-rpc-server -j"$(nproc)"
     cp "$LLAMA_CPP_DIR/build/bin/ggml-rpc-server" "$ULTRON_HOME/bin/ggml-rpc-server"
