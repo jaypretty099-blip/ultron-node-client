@@ -444,7 +444,32 @@ BOOTEOF
 chmod +x "$HOME/.termux/boot/start_ultron.sh"
 
 # ----------------------------------------------------------------------------
-# 6. No point making you wait for a reboot — report for duty right now
+# 6. Termux:Boot only fires on an actual phone reboot — it does nothing if
+#    Android just kills the Termux process in the background (very common;
+#    Android is aggressive about reclaiming memory from apps it thinks are
+#    idle) and you reopen the app yourself later. This covers that case:
+#    every fresh Termux shell quietly checks in, same guarded logic, so
+#    reopening the app after a kill is just as good as a reboot.
+# ----------------------------------------------------------------------------
+ULTRON_BASHRC_MARKER="# --- ultron-legion-autostart ---"
+if ! grep -qF "$ULTRON_BASHRC_MARKER" "$HOME/.bashrc" 2>/dev/null; then
+    log "Teaching Termux to check in every time you open it, not just on reboot ..."
+    cat >> "$HOME/.bashrc" <<'BASHRCEOF'
+
+# --- ultron-legion-autostart ---
+# Covers the gap Termux:Boot can't: Android killing this process in the
+# background rather than the phone actually rebooting. Silent, backgrounded,
+# and cheap when everything's already running (a handful of pgrep checks) —
+# only does real work in the rarer case where something actually died.
+if [[ -x "$HOME/.termux/boot/start_ultron.sh" ]]; then
+    nohup "$HOME/.termux/boot/start_ultron.sh" >> "$HOME/.ultron/logs/node.log" 2>&1 &
+    disown
+fi
+BASHRCEOF
+fi
+
+# ----------------------------------------------------------------------------
+# 7. No point making you wait for a reboot — report for duty right now
 # ----------------------------------------------------------------------------
 log "Skipping the paperwork, sending you straight to the front line ..."
 "$HOME/.termux/boot/start_ultron.sh"
