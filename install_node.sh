@@ -191,13 +191,17 @@ if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
     log "WARNING: couldn't get a key (HQ didn't answer and none was provided). Everything"
     log "else is installed and ready — you just need to finish enlistment manually once"
     log "you've got a key:"
-    log "  $TAILSCALE_BIN --socket=$TAILSCALE_SOCKET up --authkey=<key> --hostname=$NODE_HOSTNAME --accept-dns=false"
+    log "  proot -0 $TAILSCALE_BIN --socket=$TAILSCALE_SOCKET up --authkey=<key> --hostname=$NODE_HOSTNAME --accept-dns=false"
 else
-    "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" up \
+    # proot -0 here too, matching tailscaled above — the daemon sees itself as
+    # fake-root, so a client connecting as the real (non-root) user gets
+    # "Access denied: checkprefs access denied". Same fake identity on both
+    # ends and the mismatch goes away.
+    proot -0 "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" up \
         --authkey="$TAILSCALE_AUTH_KEY" \
         --hostname="$NODE_HOSTNAME" \
         --accept-dns=false
-    log "Welcome to the Legion, $NODE_HOSTNAME. Your badge number is $("$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4)"
+    log "Welcome to the Legion, $NODE_HOSTNAME. Your badge number is $(proot -0 "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4)"
 fi
 
 # ----------------------------------------------------------------------------
@@ -231,7 +235,7 @@ if ! pgrep -f "tailscaled.*--socket=\$TAILSCALE_SOCKET" >/dev/null 2>&1; then
 fi
 
 for i in \$(seq 1 30); do
-    if "\$ULTRON_HOME/bin/tailscale" --socket="\$TAILSCALE_SOCKET" ip -4 >/dev/null 2>&1; then
+    if proot -0 "\$ULTRON_HOME/bin/tailscale" --socket="\$TAILSCALE_SOCKET" ip -4 >/dev/null 2>&1; then
         break
     fi
     sleep 2
