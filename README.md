@@ -40,9 +40,6 @@ Your phone doesn't download the AI model itself, doesn't need to be plugged in f
 **Is my phone going to become self-aware?**
 No. It's going to become slightly warmer than usual and occasionally do some math. That's the whole superpower.
 
-**Can I leave the Legion?**
-Yes — uninstall Termux, or just `tailscale down` if you want to keep the terminal around for other crimes. No hard feelings, no exit interview.
-
 **Why is it called Ultron?**
 Because "Distributed-Inference-Coordination-Framework-v2" doesn't have the same ring to it, and every good origin story needs a slightly ominous name.
 
