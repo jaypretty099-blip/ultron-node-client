@@ -80,6 +80,21 @@ log "Enlisting this phone as $NODE_HOSTNAME. Stand by."
 # ----------------------------------------------------------------------------
 log "Requisitioning supplies (a compiler, some tools, the usual) ..."
 pkg update -y
+
+# A full upgrade first, not just installing the specific packages below.
+# Real devices in the wild show up with packages quietly out of sync with
+# each other in ways "already the newest version" doesn't catch — e.g. a
+# curl new enough to need a symbol from a newer OpenSSL than what's
+# actually installed, which breaks curl (and git's https support)
+# completely with a bare "CANNOT LINK EXECUTABLE ... cannot locate symbol"
+# and no hint why. Confirmed on two different real phones so far, two
+# different specific libraries each time — this isn't a one-off. Package
+# lists were just refreshed above, so apt/dpkg's own fetcher (not the
+# `curl` binary, which might itself be the broken one right now) handles
+# this fine even when curl can't currently run at all.
+apt-get upgrade -y -qq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+    || log "Full upgrade hit a snag (continuing anyway — the specific installs below get their own shot)"
+
 pkg install -y git cmake clang make python curl golang termux-services iproute2
 
 if [[ ! -x "$ULTRON_HOME/bin/tailscaled" ]]; then
