@@ -48,7 +48,7 @@ LOG_FILE="$ULTRON_HOME/logs/install.log"
 
 # ============================================================================
 
-mkdir -p "$ULTRON_HOME"/{bin,logs,config} "$HOME/.termux/boot" "$TAILSCALE_DIR"
+mkdir -p "$ULTRON_HOME"/{bin,logs,config,tmp} "$HOME/.termux/boot" "$TAILSCALE_DIR"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 log() { echo "[install_node] $*"; }
@@ -77,11 +77,16 @@ if ! command -v tailscale >/dev/null 2>&1; then
         die "could not determine latest Tailscale version (network may be unstable — re-run this script to retry); or install tailscale manually"
     fi
     TS_TARBALL="tailscale_${TS_VERSION}_${TS_ARCH}.tgz"
-    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o /tmp/tailscale.tgz "https://pkgs.tailscale.com/stable/${TS_TARBALL}"
-    tar -xzf /tmp/tailscale.tgz -C /tmp
-    cp "/tmp/tailscale_${TS_VERSION}_${TS_ARCH}/tailscale" "/tmp/tailscale_${TS_VERSION}_${TS_ARCH}/tailscaled" "$ULTRON_HOME/bin/"
+    # Not using /tmp on purpose: it's a plain directory Termux happens to
+    # provide most of the time, not a guaranteed mountpoint like on a real
+    # Linux box — some devices just don't have it, and curl fails oddly when
+    # it doesn't (learned this one the hard way, on a real phone).
+    TMP_DIR="$ULTRON_HOME/tmp"
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o "$TMP_DIR/tailscale.tgz" "https://pkgs.tailscale.com/stable/${TS_TARBALL}"
+    tar -xzf "$TMP_DIR/tailscale.tgz" -C "$TMP_DIR"
+    cp "$TMP_DIR/tailscale_${TS_VERSION}_${TS_ARCH}/tailscale" "$TMP_DIR/tailscale_${TS_VERSION}_${TS_ARCH}/tailscaled" "$ULTRON_HOME/bin/"
     chmod +x "$ULTRON_HOME/bin/tailscale" "$ULTRON_HOME/bin/tailscaled"
-    rm -rf /tmp/tailscale.tgz "/tmp/tailscale_${TS_VERSION}_${TS_ARCH}"
+    rm -rf "$TMP_DIR/tailscale.tgz" "$TMP_DIR/tailscale_${TS_VERSION}_${TS_ARCH}"
     export PATH="$ULTRON_HOME/bin:$PATH"
 fi
 
