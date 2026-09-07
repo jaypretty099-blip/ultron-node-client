@@ -170,6 +170,16 @@ fi
 log "Waking up the private network connection ..."
 mkdir -p "$TAILSCALE_STATE_DIR"
 
+if pgrep -f "tailscaled.*--socket=$TAILSCALE_SOCKET" >/dev/null 2>&1 && [[ ! -S "$TAILSCALE_SOCKET" ]]; then
+    # A process matching this command line exists, but its socket doesn't —
+    # that's a stale/orphaned daemon (crashed, killed by the OS, whatever),
+    # not a healthy one. Trusting pgrep alone here would make us wait
+    # forever for a socket that's never coming. Clear it out and start over.
+    log "Found a stale tailscaled with no working socket, clearing it out ..."
+    pkill -f "tailscaled.*--socket=$TAILSCALE_SOCKET" 2>/dev/null || true
+    sleep 1
+fi
+
 if ! pgrep -f "tailscaled.*--socket=$TAILSCALE_SOCKET" >/dev/null 2>&1; then
     nohup "$TAILSCALED_BIN" \
         --socket="$TAILSCALE_SOCKET" \
