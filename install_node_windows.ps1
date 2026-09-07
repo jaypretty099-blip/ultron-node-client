@@ -180,7 +180,8 @@ while (`$listener.IsListening) {
         `$os = Get-CimInstance Win32_OperatingSystem
         `$totalBytes = [int64]`$os.TotalVisibleMemorySize * 1024
         `$availableBytes = [int64]`$os.FreePhysicalMemory * 1024
-        `$body = (@{ total_bytes = `$totalBytes; available_bytes = `$availableBytes } | ConvertTo-Json)
+        `$cpuCount = [Environment]::ProcessorCount
+        `$body = (@{ total_bytes = `$totalBytes; available_bytes = `$availableBytes; cpu_count = `$cpuCount } | ConvertTo-Json)
         `$buffer = [System.Text.Encoding]::UTF8.GetBytes(`$body)
         `$response.ContentType = "application/json"
         `$response.ContentLength64 = `$buffer.Length

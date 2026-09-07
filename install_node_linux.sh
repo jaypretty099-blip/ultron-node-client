@@ -203,9 +203,10 @@ if command -v python3 >/dev/null 2>&1; then
     HAVE_PYTHON3=1
     cat > "$ULTRON_HOME/bin/node_agent.py" <<'PYEOF'
 #!/usr/bin/env python3
-"""The world's smallest snitch: reports how much RAM this machine has free
-so HQ knows whether to trust it with real work. Loopback-only."""
+"""The world's smallest snitch: reports how much RAM (and CPU) this machine
+has free so HQ knows whether to trust it with real work. Loopback-only."""
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -230,7 +231,11 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         total_bytes, available_bytes = read_meminfo()
-        body = json.dumps({"total_bytes": total_bytes, "available_bytes": available_bytes}).encode()
+        body = json.dumps({
+            "total_bytes": total_bytes,
+            "available_bytes": available_bytes,
+            "cpu_count": os.cpu_count(),
+        }).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
