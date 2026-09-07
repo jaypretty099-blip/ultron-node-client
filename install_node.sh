@@ -53,6 +53,24 @@ LLAMA_CPP_DIR="$ULTRON_HOME/src/llama.cpp"
 # together, not independently.
 LLAMA_CPP_PINNED_COMMIT="0cae43063cf15170e91a2ff4d034da0ecef4a1b2"
 
+TAILSCALE_REPO="https://github.com/tailscale/tailscale.git"
+TAILSCALE_SRC_DIR="$ULTRON_HOME/src/tailscale"
+# Also pinned, for the same reason as llama.cpp above plus one more: we've
+# already found and worked around two real bugs in specific tailscale
+# builds (a login crash in its Taildrop feature, an Android build-constraint
+# gap in two unrelated features) by picking exactly what gets compiled in.
+# An unpinned "whatever's on GitHub today" build could silently reintroduce
+# either the day we're not looking. Bump deliberately, not by accident.
+TAILSCALE_PINNED_COMMIT="5201273aec737d6372ab7423c31c04ca3ca2a0c2"
+# These ts_omit_* tags skip features we don't need (SSH server, system tray
+# icon, Synology cert helper, CLI connection diagnostics, ACME, Taildrop
+# file sharing) — partly to dodge build-constraint gaps where a feature's
+# "linux-only" tag forgot to also exclude android, and partly because
+# ts_omit_taildrop sidesteps a real nil-pointer panic on login in this
+# build (feature/taildrop's onChangeProfile — confirmed crash on a real
+# device, not present at all once the feature is left out).
+TAILSCALE_BUILD_TAGS="ts_omit_ssh,ts_omit_systray,ts_omit_synology,ts_omit_cliconndiag,ts_omit_acme,ts_omit_taildrop"
+
 # Both of these only answer to the tailnet, never the open internet. The RPC
 # worker in particular has zero authentication by design (llama.cpp's own
 # docs say so, in bold), so keeping it strictly on the private network isn't
@@ -97,35 +115,47 @@ apt-get upgrade -y -qq -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="
 
 pkg install -y git cmake clang make python curl golang termux-services iproute2
 
-if [[ ! -x "$ULTRON_HOME/bin/tailscaled" ]]; then
-    # Termux doesn't stock Tailscale, and — this took a while to track down —
-    # the prebuilt Linux binary Tailscale publishes doesn't actually work
-    # here: its network monitor needs a netlink route-table read that
-    # Android's security policy denies to every unprivileged app, no
-    # exceptions. Not a Termux quirk, not this phone, just how Android works.
-    # Tailscale's own Android app avoids this by building for GOOS=android
-    # instead of GOOS=linux, which swaps in a safe, netlink-free code path —
-    # and Termux's own Go toolchain already targets GOOS=android by default.
-    # So: build it ourselves, the same way the real app does, instead of
-    # downloading a binary that's quietly broken for this exact use case.
+# Termux doesn't stock Tailscale, and — this took a while to track down —
+# the prebuilt Linux binary Tailscale publishes doesn't actually work here:
+# its network monitor needs a netlink route-table read that Android's
+# security policy denies to every unprivileged app, no exceptions. Not a
+# Termux quirk, not this phone, just how Android works. Tailscale's own
+# Android app avoids this by building for GOOS=android instead of
+# GOOS=linux, which swaps in a safe, netlink-free code path — and Termux's
+# own Go toolchain already targets GOOS=android by default. So: build it
+# ourselves, the same way the real app does.
+#
+# Rebuild is gated on a signature (commit + build tags), not just "does the
+# binary exist" — a rebuild-only-if-missing check would mean a future
+# change to either one (say, fixing another Android-specific bug the way
+# we already did for Taildrop) would silently never reach a phone that
+# already has some tailscaled binary sitting there, no matter how many
+# times the updater re-runs this script. The signature is what actually
+# changes when we change something, so it's what actually triggers a
+# rebuild.
+TAILSCALE_DESIRED_SIGNATURE="${TAILSCALE_PINNED_COMMIT}:${TAILSCALE_BUILD_TAGS}"
+TAILSCALE_SIGNATURE_FILE="$ULTRON_HOME/bin/.tailscale_build_signature"
+TAILSCALE_CURRENT_SIGNATURE=""
+if [[ -f "$TAILSCALE_SIGNATURE_FILE" ]]; then
+    TAILSCALE_CURRENT_SIGNATURE="$(cat "$TAILSCALE_SIGNATURE_FILE" 2>/dev/null || true)"
+fi
+
+if [[ ! -x "$ULTRON_HOME/bin/tailscaled" || "$TAILSCALE_CURRENT_SIGNATURE" != "$TAILSCALE_DESIRED_SIGNATURE" ]]; then
     log "Building Tailscale from source (the prebuilt one doesn't work on Android — long story,"
     log "ask me sometime). This is the other slow part."
-    TS_SRC_DIR="$ULTRON_HOME/src/tailscale"
-    if [[ ! -d "$TS_SRC_DIR" ]]; then
-        git clone --depth 1 https://github.com/tailscale/tailscale.git "$TS_SRC_DIR"
+    if [[ ! -d "$TAILSCALE_SRC_DIR/.git" ]]; then
+        rm -rf "$TAILSCALE_SRC_DIR"
+        mkdir -p "$TAILSCALE_SRC_DIR"
+        git init -q "$TAILSCALE_SRC_DIR"
+        git -C "$TAILSCALE_SRC_DIR" remote add origin "$TAILSCALE_REPO"
     fi
-    # These ts_omit_* tags skip features we don't need (SSH server, system
-    # tray icon, Synology cert helper, CLI connection diagnostics, ACME,
-    # Taildrop file sharing) — partly to dodge build-constraint gaps where a
-    # feature's "linux-only" tag forgot to also exclude android, and partly
-    # because ts_omit_taildrop sidesteps a real nil-pointer panic on login
-    # in this build (feature/taildrop's onChangeProfile — confirmed crash on
-    # a real device, not present at all once the feature is left out).
-    TS_BUILD_TAGS="ts_omit_ssh,ts_omit_systray,ts_omit_synology,ts_omit_cliconndiag,ts_omit_acme,ts_omit_taildrop"
-    (cd "$TS_SRC_DIR" && go build -tags "$TS_BUILD_TAGS" -o "$ULTRON_HOME/bin/tailscaled" ./cmd/tailscaled)
-    (cd "$TS_SRC_DIR" && go build -tags "$TS_BUILD_TAGS" -o "$ULTRON_HOME/bin/tailscale" ./cmd/tailscale)
+    git -C "$TAILSCALE_SRC_DIR" fetch --depth 1 origin "$TAILSCALE_PINNED_COMMIT"
+    git -C "$TAILSCALE_SRC_DIR" checkout -q FETCH_HEAD
+    (cd "$TAILSCALE_SRC_DIR" && go build -tags "$TAILSCALE_BUILD_TAGS" -o "$ULTRON_HOME/bin/tailscaled" ./cmd/tailscaled)
+    (cd "$TAILSCALE_SRC_DIR" && go build -tags "$TAILSCALE_BUILD_TAGS" -o "$ULTRON_HOME/bin/tailscale" ./cmd/tailscale)
+    echo "$TAILSCALE_DESIRED_SIGNATURE" > "$TAILSCALE_SIGNATURE_FILE"
 else
-    log "Already built Tailscale from source — skipping"
+    log "Already built Tailscale from source at the pinned commit — skipping"
 fi
 
 export PATH="$ULTRON_HOME/bin:$PATH"
