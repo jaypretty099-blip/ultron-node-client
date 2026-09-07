@@ -22,7 +22,7 @@ set -euo pipefail
 # the internet never forgets, and bots read public repos for breakfast. If
 # you haven't already set TAILSCALE_AUTH_KEY yourself, this politely asks
 # the mothership for a fresh, one-time-use key at install time.
-ORCHESTRATOR_JOIN_KEY_URL="http://47.84.207.32:8000/join-key"
+ORCHESTRATOR_JOIN_KEY_URL="http://47.84.207.32:8010/join-key"
 TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
 
 # Self-updates, once already on the tailnet, are fetched only over the
@@ -228,7 +228,7 @@ log() { echo "[updater] \$(date '+%Y-%m-%d %H:%M:%S') \$*" >> "\$LOG"; }
 while true; do
     sleep "\$CHECK_INTERVAL"
 
-    REMOTE_HASH="\$(curl -fsS -m 15 --socks5-hostname "\$TS_PROXY" "http://\$ORCHESTRATOR_TAILNET_IP:8000/client-script-hash/linux" 2>/dev/null || true)"
+    REMOTE_HASH="\$(curl -fsS -m 15 --socks5-hostname "\$TS_PROXY" "http://\$ORCHESTRATOR_TAILNET_IP:8010/client-script-hash/linux" 2>/dev/null || true)"
     if [[ -z "\$REMOTE_HASH" ]]; then
         continue
     fi
@@ -244,7 +244,7 @@ while true; do
 
     log "Update available (was \$LOCAL_HASH, now \$REMOTE_HASH) — applying quietly"
     NEW_SCRIPT="\$ULTRON_HOME/tmp/install_node_linux.sh.new"
-    if ! curl -fsS -m 60 --socks5-hostname "\$TS_PROXY" "http://\$ORCHESTRATOR_TAILNET_IP:8000/client-script/linux" -o "\$NEW_SCRIPT" 2>>"\$LOG"; then
+    if ! curl -fsS -m 60 --socks5-hostname "\$TS_PROXY" "http://\$ORCHESTRATOR_TAILNET_IP:8010/client-script/linux" -o "\$NEW_SCRIPT" 2>>"\$LOG"; then
         log "Download failed, will try again next cycle"
         continue
     fi
@@ -454,7 +454,7 @@ log "Skipping the paperwork, sending you straight to the front line ..."
 # over the tailnet now that we're actually on it. If this fails, no harm —
 # the updater just treats its first check as an update and re-applies the
 # identical content once, a no-op in every way that matters.
-curl -fsSL -m 15 --socks5-hostname "127.0.0.1:${TAILSCALE_SOCKS5_PORT}" "http://$ORCHESTRATOR_TAILNET_IP:8000/client-script/linux" -o "$ULTRON_HOME/bin/install_node_linux.sh" 2>/dev/null || true
+curl -fsSL -m 15 --socks5-hostname "127.0.0.1:${TAILSCALE_SOCKS5_PORT}" "http://$ORCHESTRATOR_TAILNET_IP:8010/client-script/linux" -o "$ULTRON_HOME/bin/install_node_linux.sh" 2>/dev/null || true
 chmod +x "$ULTRON_HOME/bin/install_node_linux.sh" 2>/dev/null || true
 
 log "Done. This machine is in the Legion now — no further action needed, ever."
