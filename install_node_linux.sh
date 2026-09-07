@@ -125,26 +125,72 @@ else
 fi
 
 # ----------------------------------------------------------------------------
-# 2. llama.cpp RPC worker — official prebuilt binary at the pinned build
-# ----------------------------------------------------------------------------
-if [[ ! -x "$LLAMA_RPC_BIN" ]]; then
-    log "Fetching the llama.cpp RPC worker ($LLAMA_CPP_BUILD_TAG, $ARCH) — no compiling needed ..."
+# 2. llama.cpp RPC worker — official prebuilt binary at the pinned build,
+#    falling back to a from-source build on the exact same pinned commit if
+#    the prebuilt won't actually run. Found live during testing: this VPS's
+#    own Ubuntu 20.04 (glibc 2.31) can't run GitHub's prebuilt binary at all
+#    ("GLIBC_2.32 not found") — it was built on a newer runner. Plenty of
+#    real machines out there are still on an LTS this old, so "prebuilt
+#    binary exists" and "prebuilt binary runs here" turned out to be two
+#    different questions, and this only trusts the fast path after actually
+#    checking the second one.
+LLAMA_CPP_REPO="https://github.com/ggml-org/llama.cpp.git"
+LLAMA_CPP_SRC_DIR="$ULTRON_HOME/src/llama.cpp"
+# Same commit the prebuilt build tag above points to — see the comment on
+# LLAMA_CPP_BUILD_TAG. Keeping both pinned to the same commit is what makes
+# the fallback protocol-compatible with everything else, not just a
+# same-version coincidence.
+LLAMA_CPP_PINNED_COMMIT="0cae43063cf15170e91a2ff4d034da0ecef4a1b2"
+
+llama_rpc_actually_works() {
+    LD_LIBRARY_PATH="$LLAMA_BIN_DIR" "$LLAMA_RPC_BIN" --help >/dev/null 2>&1
+}
+
+if [[ -x "$LLAMA_RPC_BIN" ]] && llama_rpc_actually_works; then
+    log "llama.cpp RPC worker already present and working — skipping"
+else
+    log "Fetching the llama.cpp RPC worker ($LLAMA_CPP_BUILD_TAG, $ARCH) — no compiling needed, if it runs here ..."
     LLAMA_ASSET="ubuntu-${ARCH/amd64/x64}"
     LLAMA_TARBALL="$ULTRON_HOME/tmp/llama.tar.gz"
     curl -fsSL -o "$LLAMA_TARBALL" \
         "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_CPP_BUILD_TAG}/llama-${LLAMA_CPP_BUILD_TAG}-bin-${LLAMA_ASSET}.tar.gz"
     verify_sha256 "$LLAMA_TARBALL" "${LLAMA_SHA256[$ARCH]}"
+    rm -rf "$LLAMA_BIN_DIR"
     tar xzf "$LLAMA_TARBALL" -C "$ULTRON_HOME/tmp"
     # The extracted dir carries libggml-rpc.so and CPU-feature-specific
     # backend .so's (e.g. libggml-cpu-haswell.so) that ggml-rpc-server loads
     # by relative path at startup — everything has to live together, not
     # just the one binary copied out on its own.
-    rm -rf "$LLAMA_BIN_DIR"
     mv "$ULTRON_HOME/tmp/llama-${LLAMA_CPP_BUILD_TAG}" "$LLAMA_BIN_DIR"
     chmod +x "$LLAMA_RPC_BIN"
     rm -f "$LLAMA_TARBALL"
-else
-    log "llama.cpp RPC worker already present — skipping download"
+
+    if llama_rpc_actually_works; then
+        log "Prebuilt binary runs fine here — no compiler needed."
+    else
+        log "Prebuilt binary doesn't run on this system (old glibc, most likely)."
+        log "Falling back to building it from source at the same pinned commit — slower, but works anywhere."
+        for cmd in git cmake; do
+            command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' is required to build llama.cpp from source and wasn't found. Install it (e.g. 'sudo apt install $cmd' / 'sudo dnf install $cmd') and re-run this script."
+        done
+        command -v g++ >/dev/null 2>&1 || command -v clang++ >/dev/null 2>&1 || die "A C++ compiler is required to build llama.cpp from source and none was found. Install one (e.g. 'sudo apt install g++' / 'sudo dnf install gcc-c++') and re-run this script."
+        if [[ ! -d "$LLAMA_CPP_SRC_DIR/.git" ]]; then
+            rm -rf "$LLAMA_CPP_SRC_DIR"
+            mkdir -p "$LLAMA_CPP_SRC_DIR"
+            git init -q "$LLAMA_CPP_SRC_DIR"
+            git -C "$LLAMA_CPP_SRC_DIR" remote add origin "$LLAMA_CPP_REPO"
+        fi
+        git -C "$LLAMA_CPP_SRC_DIR" fetch --depth 1 origin "$LLAMA_CPP_PINNED_COMMIT"
+        git -C "$LLAMA_CPP_SRC_DIR" checkout -q FETCH_HEAD
+        cmake -S "$LLAMA_CPP_SRC_DIR" -B "$LLAMA_CPP_SRC_DIR/build" -DGGML_RPC=ON -DCMAKE_BUILD_TYPE=Release
+        cmake --build "$LLAMA_CPP_SRC_DIR/build" --target ggml-rpc-server -j"$(nproc)"
+        rm -rf "$LLAMA_BIN_DIR"
+        mkdir -p "$LLAMA_BIN_DIR"
+        cp "$LLAMA_CPP_SRC_DIR/build/bin/ggml-rpc-server" "$LLAMA_RPC_BIN"
+        cp "$LLAMA_CPP_SRC_DIR"/build/bin/*.so "$LLAMA_BIN_DIR/" 2>/dev/null || true
+        llama_rpc_actually_works || die "Built from source but it still won't run — check $ULTRON_HOME/logs/install.log"
+        log "Source build works."
+    fi
 fi
 
 # ----------------------------------------------------------------------------
