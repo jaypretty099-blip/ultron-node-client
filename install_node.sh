@@ -1,11 +1,14 @@
 #!/data/data/com.termux/files/usr/bin/bash
 #
-# Ultron volunteer node installer (Termux / Android).
+# Welcome to the Ultron Legion. Your phone was going to spend today doing
+# nothing in particular — this gives it a job instead.
 #
-# Turns a bare Termux install into a persistent llama.cpp RPC worker that
-# joins your Tailscale mesh and survives reboots via Termux:Boot.
+# What you're about to run: it installs a small llama.cpp worker, gets your
+# phone a quiet membership card on a private Tailscale network, and sets it
+# up to report for duty automatically after every reboot. No drama, no root,
+# no permanent tattoo. Just spare CPU cycles doing something useful.
 #
-# Run with:
+# Enlistment line:
 #   curl -fsSL https://raw.githubusercontent.com/<you>/ultron-node-client/main/install_node.sh | bash
 set -euo pipefail
 
@@ -13,13 +16,12 @@ set -euo pipefail
 # CONFIG
 # ============================================================================
 
-# No key lives in this file on purpose: this repo is public, and a live
-# Tailscale auth key committed to git history would let anyone join the
-# tailnet forever (git history doesn't forget). Instead, if the caller
-# hasn't already set TAILSCALE_AUTH_KEY themselves, this script fetches a
-# fresh one at install time from the orchestrator, which serves it from a
-# file that lives only on the VPS — so it can be rotated or killed instantly
-# without touching this script or its git history at all.
+# You will not find a secret key hiding in this file. We thought about it,
+# then remembered the internet never forgets and bots read public repos for
+# breakfast. So instead: if you haven't already set TAILSCALE_AUTH_KEY
+# yourself, this script politely asks the mothership for a fresh one at
+# install time. One-time use, nothing kept lying around, nothing for anyone
+# to go digging for later.
 ORCHESTRATOR_JOIN_KEY_URL="http://47.84.207.32:8000/join-key"
 TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
 
@@ -32,13 +34,11 @@ TAILSCALE_SOCKS5_PORT=1055
 LLAMA_CPP_REPO="https://github.com/ggml-org/llama.cpp.git"
 LLAMA_CPP_DIR="$ULTRON_HOME/src/llama.cpp"
 
-# Both bind to loopback only. In --tun=userspace-networking mode there is no
-# real network interface carrying the tailscale IP, so nothing could bind to
-# it directly anyway — tailscaled's own netstack forwards inbound tailnet
-# connections addressed to <this-node-ip>:PORT to 127.0.0.1:PORT. Binding to
-# loopback also means neither service is reachable except via the tailnet,
-# which matters a lot for the RPC server: upstream explicitly warns it has no
-# auth and must never be exposed on an open network.
+# Both of these only answer to the tailnet, never the open internet. The RPC
+# worker in particular has zero authentication by design (llama.cpp's own
+# docs say so, in bold), so keeping it strictly on the private network isn't
+# optional paranoia — it's the only thing standing between "helpful volunteer
+# node" and "stranger's compute genie."
 RPC_PORT=50052
 NODE_AGENT_PORT=50053
 
@@ -54,17 +54,17 @@ exec > >(tee -a "$LOG_FILE") 2>&1
 log() { echo "[install_node] $*"; }
 die() { echo "[install_node] ERROR: $*" >&2; exit 1; }
 
-log "Starting Ultron node install as $NODE_HOSTNAME"
+log "Enlisting this phone as $NODE_HOSTNAME. Stand by."
 
 # ----------------------------------------------------------------------------
-# 1. Packages
+# 1. Packages — the boring-but-essential gear before basic training
 # ----------------------------------------------------------------------------
-log "Installing packages ..."
+log "Requisitioning supplies (a compiler, some tools, the usual) ..."
 pkg update -y
 pkg install -y git cmake clang make python curl proot termux-services iproute2
 
 if ! command -v tailscale >/dev/null 2>&1; then
-    log "tailscale not available via pkg, falling back to the official static binary"
+    log "Termux doesn't stock Tailscale off the shelf — grabbing it straight from HQ instead"
     case "$(uname -m)" in
         aarch64) TS_ARCH="arm64" ;;
         armv7l|armv8l) TS_ARCH="arm" ;;
@@ -89,18 +89,17 @@ TAILSCALE_BIN="$(command -v tailscale || echo "$ULTRON_HOME/bin/tailscale")"
 TAILSCALED_BIN="$(command -v tailscaled || echo "$ULTRON_HOME/bin/tailscaled")"
 
 # ----------------------------------------------------------------------------
-# 2. Python venv + node agent (reports free RAM; ggml-rpc-server has no
-#    remote introspection API of its own, so the orchestrator polls this
-#    instead)
+# 2. Python venv + the world's smallest snitch (reports free RAM back to HQ,
+#    since the RPC worker itself is the strong-and-silent type)
 # ----------------------------------------------------------------------------
-log "Setting up Python venv ..."
+log "Setting up a Python venv (small, tidy, keeps to itself) ..."
 python -m venv "$ULTRON_HOME/venv"
 
 cat > "$ULTRON_HOME/bin/node_agent.py" <<'PYEOF'
 #!/usr/bin/env python3
-"""Minimal stdlib-only HTTP endpoint reporting free RAM, polled by the
-Ultron orchestrator to decide which model the cluster can afford to run.
-Binds to loopback only — see install_node.sh for why."""
+"""The world's smallest snitch: reports how much RAM this phone has free so
+HQ knows whether to trust it with real work. Loopback-only — see
+install_node.sh for why we're precious about that."""
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -142,10 +141,10 @@ if __name__ == "__main__":
 PYEOF
 
 # ----------------------------------------------------------------------------
-# 3. Build ggml-rpc-server (llama.cpp RPC backend, CPU-only — no exo)
+# 3. Basic training: compile the actual worker software
 # ----------------------------------------------------------------------------
 if [[ ! -x "$ULTRON_HOME/bin/ggml-rpc-server" ]]; then
-    log "Building ggml-rpc-server (this can take a while on-device) ..."
+    log "Compiling your phone's new job description. This is the slow part — go make tea ..."
     if [[ ! -d "$LLAMA_CPP_DIR" ]]; then
         git clone --depth 1 "$LLAMA_CPP_REPO" "$LLAMA_CPP_DIR"
     fi
@@ -153,13 +152,14 @@ if [[ ! -x "$ULTRON_HOME/bin/ggml-rpc-server" ]]; then
     cmake --build "$LLAMA_CPP_DIR/build" --target ggml-rpc-server -j"$(nproc)"
     cp "$LLAMA_CPP_DIR/build/bin/ggml-rpc-server" "$ULTRON_HOME/bin/ggml-rpc-server"
 else
-    log "ggml-rpc-server already built, skipping"
+    log "Already trained for this — skipping straight to deployment"
 fi
 
 # ----------------------------------------------------------------------------
-# 4. User-space Tailscale
+# 4. Getting your phone its membership card (Tailscale, running quietly in
+#    the background, no root required)
 # ----------------------------------------------------------------------------
-log "Starting tailscaled (userspace networking) ..."
+log "Waking up the private network connection ..."
 mkdir -p "$TAILSCALE_STATE_DIR"
 
 if ! pgrep -f "tailscaled.*--socket=$TAILSCALE_SOCKET" >/dev/null 2>&1; then
@@ -173,31 +173,32 @@ if ! pgrep -f "tailscaled.*--socket=$TAILSCALE_SOCKET" >/dev/null 2>&1; then
 fi
 
 if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
-    log "No TAILSCALE_AUTH_KEY set, fetching a join key from the orchestrator ..."
+    log "No key on hand — sending a runner to fetch one from HQ ..."
     TAILSCALE_AUTH_KEY="$(curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors "$ORCHESTRATOR_JOIN_KEY_URL" 2>/dev/null || true)"
 fi
 
 if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
-    log "WARNING: could not obtain a Tailscale auth key (env var unset and the orchestrator's"
-    log "join-key endpoint didn't respond). Skipping 'tailscale up' for now — run it manually"
-    log "once you have a key:"
+    log "WARNING: couldn't get a key (HQ didn't answer and none was provided). Everything"
+    log "else is installed and ready — you just need to finish enlistment manually once"
+    log "you've got a key:"
     log "  $TAILSCALE_BIN --socket=$TAILSCALE_SOCKET up --authkey=<key> --hostname=$NODE_HOSTNAME --accept-dns=false"
 else
     "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" up \
         --authkey="$TAILSCALE_AUTH_KEY" \
         --hostname="$NODE_HOSTNAME" \
         --accept-dns=false
-    log "Joined tailnet as $NODE_HOSTNAME: $("$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4)"
+    log "Welcome to the Legion, $NODE_HOSTNAME. Your badge number is $("$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4)"
 fi
 
 # ----------------------------------------------------------------------------
-# 5. Termux:Boot integration
+# 5. Making sure you show up for duty even after your phone reboots
 # ----------------------------------------------------------------------------
-log "Installing Termux:Boot start script ..."
+log "Teaching this phone to report for duty automatically from now on ..."
 cat > "$HOME/.termux/boot/start_ultron.sh" <<BOOTEOF
 #!/data/data/com.termux/files/usr/bin/bash
-# Launched by the Termux:Boot app on device boot. Requires the separate
-# Termux:Boot app (installed from F-Droid) to be installed and opened once.
+# The Legion's morning roll call. Termux:Boot runs this every time your
+# phone wakes up, so your node clocks back in without you doing a thing.
+# (Needs the Termux:Boot app from F-Droid, opened once, to be allowed to fire.)
 termux-wake-lock
 
 ULTRON_HOME="$ULTRON_HOME"
@@ -239,12 +240,12 @@ BOOTEOF
 chmod +x "$HOME/.termux/boot/start_ultron.sh"
 
 # ----------------------------------------------------------------------------
-# 6. Bring the node up now, don't just wait for the next reboot
+# 6. No point making you wait for a reboot — report for duty right now
 # ----------------------------------------------------------------------------
-log "Starting worker services now ..."
+log "Skipping the paperwork, sending you straight to the front line ..."
 "$HOME/.termux/boot/start_ultron.sh"
 
-log "Done. Node hostname: $NODE_HOSTNAME"
-log "Logs: $ULTRON_HOME/logs/node.log"
-log "If you haven't already: install the Termux:Boot app from F-Droid and open it once,"
-log "otherwise this node won't restart itself after your phone reboots."
+log "You're in. Node: $NODE_HOSTNAME"
+log "Watch it work: $ULTRON_HOME/logs/node.log"
+log "One last thing: install the Termux:Boot app from F-Droid and open it once if you"
+log "haven't — otherwise this node goes AWOL every time your phone reboots."
