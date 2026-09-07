@@ -494,7 +494,16 @@ DESKTOPEOF
 # 8. No point waiting for a reboot — report for duty right now
 # ----------------------------------------------------------------------------
 log "Skipping the paperwork, sending you straight to the front line ..."
-"$ULTRON_HOME/bin/start_ultron.sh"
+# Going through systemd here rather than calling start_ultron.sh directly,
+# even though the guards inside it make either way work — otherwise
+# systemctl's own bookkeeping shows "inactive (dead)" right after a fresh
+# install despite everything actually running, which is a confusing thing
+# to see on the very first status check (confirmed live during testing).
+if command -v systemctl >/dev/null 2>&1 && systemctl --user list-unit-files ultron-node.service >/dev/null 2>&1; then
+    systemctl --user start ultron-node.service
+else
+    "$ULTRON_HOME/bin/start_ultron.sh"
+fi
 
 # Baseline copy for the updater to compare future checks against, fetched
 # over the tailnet now that we're actually on it. If this fails, no harm —
