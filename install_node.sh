@@ -412,7 +412,10 @@ log "Skipping the paperwork, sending you straight to the front line ..."
 curl -fsSL -m 15 --socks5-hostname "127.0.0.1:${TAILSCALE_SOCKS5_PORT}" "http://$ORCHESTRATOR_TAILNET_IP:8000/client-script" -o "$ULTRON_HOME/bin/install_node.sh" 2>/dev/null || true
 chmod +x "$ULTRON_HOME/bin/install_node.sh" 2>/dev/null || true
 
-log "You're in. Node: $NODE_HOSTNAME"
+# Reporting the real current identity, not $NODE_HOSTNAME — that's freshly
+# randomly generated on every run whether or not it actually gets used, and
+# on a resumed session (the normal case for an update) it never does.
+log "You're in. Badge number: $("$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4 2>/dev/null || echo "$NODE_HOSTNAME")"
 log "Watch it work: $ULTRON_HOME/logs/node.log"
 log "One last thing: install the Termux:Boot app from F-Droid and open it once if you"
 log "haven't — otherwise this node goes AWOL every time your phone reboots."
