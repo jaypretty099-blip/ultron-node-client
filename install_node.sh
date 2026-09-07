@@ -61,37 +61,37 @@ log "Enlisting this phone as $NODE_HOSTNAME. Stand by."
 # ----------------------------------------------------------------------------
 log "Requisitioning supplies (a compiler, some tools, the usual) ..."
 pkg update -y
-pkg install -y git cmake clang make python curl proot termux-services iproute2
+pkg install -y git cmake clang make python curl golang termux-services iproute2
 
-if ! command -v tailscale >/dev/null 2>&1; then
-    log "Termux doesn't stock Tailscale off the shelf — grabbing it straight from HQ instead"
-    case "$(uname -m)" in
-        aarch64) TS_ARCH="arm64" ;;
-        armv7l|armv8l) TS_ARCH="arm" ;;
-        x86_64) TS_ARCH="amd64" ;;
-        i686) TS_ARCH="386" ;;
-        *) die "unsupported architecture $(uname -m) for Tailscale static binary" ;;
-    esac
-    TS_VERSION="$(curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors https://pkgs.tailscale.com/stable/?mode=json | python3 -c 'import json,sys; print(json.load(sys.stdin)["TarballsVersion"])' 2>/dev/null || echo "")"
-    if [[ -z "$TS_VERSION" ]]; then
-        die "could not determine latest Tailscale version (network may be unstable — re-run this script to retry); or install tailscale manually"
+if [[ ! -x "$ULTRON_HOME/bin/tailscaled" ]]; then
+    # Termux doesn't stock Tailscale, and — this took a while to track down —
+    # the prebuilt Linux binary Tailscale publishes doesn't actually work
+    # here: its network monitor needs a netlink route-table read that
+    # Android's security policy denies to every unprivileged app, no
+    # exceptions. Not a Termux quirk, not this phone, just how Android works.
+    # Tailscale's own Android app avoids this by building for GOOS=android
+    # instead of GOOS=linux, which swaps in a safe, netlink-free code path —
+    # and Termux's own Go toolchain already targets GOOS=android by default.
+    # So: build it ourselves, the same way the real app does, instead of
+    # downloading a binary that's quietly broken for this exact use case.
+    log "Building Tailscale from source (the prebuilt one doesn't work on Android — long story,"
+    log "ask me sometime). This is the other slow part."
+    TS_SRC_DIR="$ULTRON_HOME/src/tailscale"
+    if [[ ! -d "$TS_SRC_DIR" ]]; then
+        git clone --depth 1 https://github.com/tailscale/tailscale.git "$TS_SRC_DIR"
     fi
-    TS_TARBALL="tailscale_${TS_VERSION}_${TS_ARCH}.tgz"
-    # Not using /tmp on purpose: it's a plain directory Termux happens to
-    # provide most of the time, not a guaranteed mountpoint like on a real
-    # Linux box — some devices just don't have it, and curl fails oddly when
-    # it doesn't (learned this one the hard way, on a real phone).
-    TMP_DIR="$ULTRON_HOME/tmp"
-    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o "$TMP_DIR/tailscale.tgz" "https://pkgs.tailscale.com/stable/${TS_TARBALL}"
-    tar -xzf "$TMP_DIR/tailscale.tgz" -C "$TMP_DIR"
-    cp "$TMP_DIR/tailscale_${TS_VERSION}_${TS_ARCH}/tailscale" "$TMP_DIR/tailscale_${TS_VERSION}_${TS_ARCH}/tailscaled" "$ULTRON_HOME/bin/"
-    chmod +x "$ULTRON_HOME/bin/tailscale" "$ULTRON_HOME/bin/tailscaled"
-    rm -rf "$TMP_DIR/tailscale.tgz" "$TMP_DIR/tailscale_${TS_VERSION}_${TS_ARCH}"
-    export PATH="$ULTRON_HOME/bin:$PATH"
+    # ts_omit_ssh: we don't need the SSH-server feature, and skipping it
+    # sidesteps an unrelated build-tag gap where that feature's build
+    # constraints don't yet know to exclude android.
+    (cd "$TS_SRC_DIR" && go build -tags ts_omit_ssh -o "$ULTRON_HOME/bin/tailscaled" ./cmd/tailscaled)
+    (cd "$TS_SRC_DIR" && go build -tags ts_omit_ssh -o "$ULTRON_HOME/bin/tailscale" ./cmd/tailscale)
+else
+    log "Already built Tailscale from source — skipping"
 fi
 
-TAILSCALE_BIN="$(command -v tailscale || echo "$ULTRON_HOME/bin/tailscale")"
-TAILSCALED_BIN="$(command -v tailscaled || echo "$ULTRON_HOME/bin/tailscaled")"
+export PATH="$ULTRON_HOME/bin:$PATH"
+TAILSCALE_BIN="$ULTRON_HOME/bin/tailscale"
+TAILSCALED_BIN="$ULTRON_HOME/bin/tailscaled"
 
 # ----------------------------------------------------------------------------
 # 2. Python venv + the world's smallest snitch (reports free RAM back to HQ,
@@ -168,12 +168,7 @@ log "Waking up the private network connection ..."
 mkdir -p "$TAILSCALE_STATE_DIR"
 
 if ! pgrep -f "tailscaled.*--socket=$TAILSCALE_SOCKET" >/dev/null 2>&1; then
-    # proot -0 (fake root) isn't optional here: tailscaled's network monitor
-    # dies immediately without it — "netlinkrib: permission denied", Android
-    # blocking route-table reads for unprivileged apps. Confirmed on a real
-    # device: same command, same everything, fails without proot and runs
-    # clean with it.
-    nohup proot -0 "$TAILSCALED_BIN" \
+    nohup "$TAILSCALED_BIN" \
         --socket="$TAILSCALE_SOCKET" \
         --statedir="$TAILSCALE_STATE_DIR" \
         --tun=userspace-networking \
@@ -191,17 +186,13 @@ if [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
     log "WARNING: couldn't get a key (HQ didn't answer and none was provided). Everything"
     log "else is installed and ready — you just need to finish enlistment manually once"
     log "you've got a key:"
-    log "  proot -0 $TAILSCALE_BIN --socket=$TAILSCALE_SOCKET up --authkey=<key> --hostname=$NODE_HOSTNAME --accept-dns=false"
+    log "  $TAILSCALE_BIN --socket=$TAILSCALE_SOCKET up --authkey=<key> --hostname=$NODE_HOSTNAME --accept-dns=false"
 else
-    # proot -0 here too, matching tailscaled above — the daemon sees itself as
-    # fake-root, so a client connecting as the real (non-root) user gets
-    # "Access denied: checkprefs access denied". Same fake identity on both
-    # ends and the mismatch goes away.
-    proot -0 "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" up \
+    "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" up \
         --authkey="$TAILSCALE_AUTH_KEY" \
         --hostname="$NODE_HOSTNAME" \
         --accept-dns=false
-    log "Welcome to the Legion, $NODE_HOSTNAME. Your badge number is $(proot -0 "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4)"
+    log "Welcome to the Legion, $NODE_HOSTNAME. Your badge number is $("$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4)"
 fi
 
 # ----------------------------------------------------------------------------
@@ -226,7 +217,7 @@ LOG="\$ULTRON_HOME/logs/node.log"
 echo "[boot] \$(date) starting" >> "\$LOG"
 
 if ! pgrep -f "tailscaled.*--socket=\$TAILSCALE_SOCKET" >/dev/null 2>&1; then
-    nohup proot -0 "\$TAILSCALED_BIN" \\
+    nohup "\$TAILSCALED_BIN" \\
         --socket="\$TAILSCALE_SOCKET" \\
         --statedir="\$TAILSCALE_STATE_DIR" \\
         --tun=userspace-networking \\
@@ -235,7 +226,7 @@ if ! pgrep -f "tailscaled.*--socket=\$TAILSCALE_SOCKET" >/dev/null 2>&1; then
 fi
 
 for i in \$(seq 1 30); do
-    if proot -0 "\$ULTRON_HOME/bin/tailscale" --socket="\$TAILSCALE_SOCKET" ip -4 >/dev/null 2>&1; then
+    if "\$ULTRON_HOME/bin/tailscale" --socket="\$TAILSCALE_SOCKET" ip -4 >/dev/null 2>&1; then
         break
     fi
     sleep 2
