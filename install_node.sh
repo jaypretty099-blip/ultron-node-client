@@ -462,5 +462,15 @@ chmod +x "$ULTRON_HOME/bin/install_node.sh" 2>/dev/null || true
 # on a resumed session (the normal case for an update) it never does.
 log "You're in. Badge number: $("$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4 2>/dev/null || echo "$NODE_HOSTNAME")"
 log "Watch it work: $ULTRON_HOME/logs/node.log"
-log "One last thing: install the Termux:Boot app from F-Droid and open it once if you"
-log "haven't — otherwise this node goes AWOL every time your phone reboots."
+
+# Tried checking whether Termux:Boot is actually installed via `pm list
+# packages` first, to only show this when it's actually needed — turns out
+# that throws a SecurityException on real devices (Termux doesn't have
+# INTERACT_ACROSS_USERS, confirmed on an actual phone), so it can't reliably
+# tell either way. Worded as a standard closing note for everyone instead of
+# guessing — the confusing part wasn't that the reminder exists, it's that
+# it read like a personal warning something's wrong when it's shown to
+# every single install regardless of their setup.
+log "Standard note shown to every install, not just yours: this only matters if"
+log "you haven't set up the Termux:Boot app (F-Droid, opened once) — if you"
+log "already have, this doesn't apply to you, carry on."
