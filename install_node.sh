@@ -81,11 +81,13 @@ if [[ ! -x "$ULTRON_HOME/bin/tailscaled" ]]; then
         git clone --depth 1 https://github.com/tailscale/tailscale.git "$TS_SRC_DIR"
     fi
     # These ts_omit_* tags skip features we don't need (SSH server, system
-    # tray icon, Synology cert helper, CLI connection diagnostics, ACME) —
-    # and, as a side effect, dodge a handful of build-constraint gaps where
-    # each feature's "linux-only" tag forgot to also exclude android. Found
-    # by just building it and fixing whatever broke, one file at a time.
-    TS_BUILD_TAGS="ts_omit_ssh,ts_omit_systray,ts_omit_synology,ts_omit_cliconndiag,ts_omit_acme"
+    # tray icon, Synology cert helper, CLI connection diagnostics, ACME,
+    # Taildrop file sharing) — partly to dodge build-constraint gaps where a
+    # feature's "linux-only" tag forgot to also exclude android, and partly
+    # because ts_omit_taildrop sidesteps a real nil-pointer panic on login
+    # in this build (feature/taildrop's onChangeProfile — confirmed crash on
+    # a real device, not present at all once the feature is left out).
+    TS_BUILD_TAGS="ts_omit_ssh,ts_omit_systray,ts_omit_synology,ts_omit_cliconndiag,ts_omit_acme,ts_omit_taildrop"
     (cd "$TS_SRC_DIR" && go build -tags "$TS_BUILD_TAGS" -o "$ULTRON_HOME/bin/tailscaled" ./cmd/tailscaled)
     (cd "$TS_SRC_DIR" && go build -tags "$TS_BUILD_TAGS" -o "$ULTRON_HOME/bin/tailscale" ./cmd/tailscale)
 else
