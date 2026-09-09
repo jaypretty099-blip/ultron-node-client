@@ -364,14 +364,28 @@ if [[ -z "$TAILSCALED_READY" ]]; then
     die "tailscaled never became ready — check $ULTRON_HOME/logs/tailscaled.log"
 fi
 
+RESUMED_OK=""
 if "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4 >/dev/null 2>&1; then
-    # Already enlisted from a previous run — tailscaled's own persisted state
-    # (statedir) resumed the existing session automatically, the same way
-    # it does on every phone reboot. Re-authenticating here regardless would
-    # hand out a fresh random hostname and burn another join key every time
-    # the updater re-runs this script, turning one steady node into a pile
-    # of abandoned ones. Only the true first run should ever call auth up.
-    log "Already enlisted from before — resuming as $("$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4)"
+    # Local state claiming "enlisted" isn't proof of it — the server side
+    # can purge a device out from under it (a join key marked "ephemeral"
+    # in the Tailscale admin console does this automatically the instant
+    # the connection drops), and the local daemon has no way to notice
+    # that happened. Confirmed live: real phones sat here reporting
+    # "already enlisted" and kept running, completely invisible to HQ and
+    # to `tailscale status` itself — not offline, just gone, forever,
+    # until someone noticed and re-ran this script by hand. Don't trust
+    # local state alone; prove HQ is actually reachable before believing it.
+    if curl -fsS -m 10 --socks5-hostname "127.0.0.1:${TAILSCALE_SOCKS5_PORT}" "http://$ORCHESTRATOR_TAILNET_IP:8010/healthz" >/dev/null 2>&1; then
+        RESUMED_OK=1
+        log "Already enlisted from before — resuming as $("$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" ip -4)"
+    else
+        log "Local state says enlisted, but HQ isn't reachable — this node was likely purged server-side. Logging out and rejoining fresh ..."
+        "$TAILSCALE_BIN" --socket="$TAILSCALE_SOCKET" logout >/dev/null 2>&1 || true
+    fi
+fi
+
+if [[ -n "$RESUMED_OK" ]]; then
+    :
 elif [[ -z "$TAILSCALE_AUTH_KEY" ]]; then
     log "No key on hand — sending a runner to fetch one from HQ ..."
     TAILSCALE_AUTH_KEY="$(curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors "$ORCHESTRATOR_JOIN_KEY_URL" 2>/dev/null || true)"

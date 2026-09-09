@@ -281,6 +281,27 @@ try {
     if ($LASTEXITCODE -eq 0) { $alreadyUp = $true }
 } catch {}
 
+# Local state claiming "enlisted" isn't proof of it — the server side can
+# purge a device out from under it (a join key marked "ephemeral" in the
+# Tailscale admin console does this automatically the instant the
+# connection drops), and the local daemon has no way to notice that
+# happened. Confirmed live on real Android/Linux nodes: they sat there
+# reporting "already enlisted" and kept running, completely invisible to
+# HQ and to `tailscale status` itself — not offline, just gone. Don't
+# trust local state alone; prove HQ is actually reachable before believing it.
+if ($alreadyUp) {
+    $resumedOk = $false
+    try {
+        curl.exe -fsS -m 10 --socks5-hostname "127.0.0.1:$TailscaleSocksPort" "http://${OrchestratorTailnetIp}:${OrchestratorGatewayPort}/healthz" *> $null
+        if ($LASTEXITCODE -eq 0) { $resumedOk = $true }
+    } catch {}
+    if (-not $resumedOk) {
+        Log "Local state says enlisted, but HQ isn't reachable — this node was likely purged server-side. Logging out and rejoining fresh ..."
+        try { & $TailscaleExe --socket=$TailscalePipe logout *> $null } catch {}
+        $alreadyUp = $false
+    }
+}
+
 if ($alreadyUp) {
     $badge = & $TailscaleExe --socket=$TailscalePipe ip -4
     Log "Already enlisted from before — resuming as $badge"
